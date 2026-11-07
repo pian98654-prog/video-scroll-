@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<title>Video Scroll</title>
+<style>
+:root{
+  --bg:#0a0a0a;
+  --fg:#f4f1ec;
+  --dim:rgba(244,241,236,.72);
+  --hot:#ffcf3f;
+  --glass:rgba(10,10,10,.5);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--bg);color:var(--fg);overflow:hidden;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#feed{height:100%;height:100dvh;overflow-y:scroll;scroll-snap-type:y mandatory;
+  overscroll-behavior:contain;scrollbar-width:none}
+#feed::-webkit-scrollbar{display:none}
+
+.item{position:relative;height:100%;height:100dvh;scroll-snap-align:start;scroll-snap-stop:always;
+  background:#000;overflow:hidden}
+.item video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+.item video.tall{object-fit:cover}
+.shade{position:absolute;left:0;right:0;bottom:0;height:42%;pointer-events:none;
+  background:linear-gradient(to top,rgba(0,0,0,.78),rgba(0,0,0,0))}
+
+.meta{position:absolute;left:16px;right:86px;bottom:calc(30px + env(safe-area-inset-bottom,0px));pointer-events:none}
+.meta h2{font-size:1.08rem;font-weight:650;line-height:1.25;letter-spacing:.005em}
+.meta p{font-size:.86rem;color:var(--dim);margin-top:4px}
+
+.rail{position:absolute;right:12px;bottom:calc(30px + env(safe-area-inset-bottom,0px));
+  display:flex;flex-direction:column;gap:16px;align-items:center}
+button.ic{width:48px;height:48px;border-radius:50%;border:0;color:var(--fg);background:var(--glass);
+  display:grid;place-items:center;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+button.ic svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:2;
+  stroke-linecap:round;stroke-linejoin:round}
+button.ic:active{transform:scale(.92)}
+button.like.on svg{fill:var(--hot);stroke:var(--hot)}
+
+.bar{position:absolute;left:0;bottom:0;height:3px;width:0;background:var(--hot);pointer-events:none}
+
+.flash,.heartpop,.oops{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.flash{opacity:0;transition:opacity .15s}
+.item.paused .flash{opacity:1}
+.flash svg{width:84px;height:84px;fill:var(--fg);filter:drop-shadow(0 2px 10px rgba(0,0,0,.5))}
+.heartpop{opacity:0}
+.heartpop svg{width:110px;height:110px;fill:var(--hot);stroke:var(--hot);stroke-width:1}
+.heartpop.go{animation:pop .6s ease-out}
+@keyframes pop{0%{opacity:0;transform:scale(.4)}25%{opacity:1;transform:scale(1.1)}100%{opacity:0;transform:scale(1)}}
+.oops{display:none;text-align:center;background:rgba(0,0,0,.7);align-content:center;gap:6px}
+.oops p:first-child{font-weight:650}
+.oops p:last-child{color:var(--dim);font-size:.9rem}
+.item.err .oops{display:grid}
+
+.top{position:fixed;z-index:5;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top,0px));
+  display:flex;justify-content:space-between;pointer-events:none}
+.top button{pointer-events:auto}
+.hint{position:fixed;z-index:4;left:0;right:0;bottom:calc(120px + env(safe-area-inset-bottom,0px));
+  text-align:center;font-size:.9rem;color:var(--fg);pointer-events:none;
+  text-shadow:0 1px 8px rgba(0,0,0,.8);animation:hint 1.6s ease-in-out infinite}
+.hint.gone{display:none}
+@keyframes hint{0%,100%{transform:translateY(0);opacity:.6}50%{transform:translateY(-8px);opacity:1}}
+@media (prefers-reduced-motion:reduce){.hint{animation:none}.heartpop.go{animation:none}}
+</style>
+</head>
+<body>
+<div class="top">
+  <button class="ic" id="mute" aria-label="Nyalakan suara"></button>
+  <button class="ic" id="add" aria-label="Tambah video dari perangkat"></button>
+</div>
+<input type="file" id="addIn" accept="video/*" multiple hidden>
+<div class="hint" id="hint">Geser ke atas</div>
+<main id="feed"></main>
+
+<script>
+(function () {
+  // ====== DAFTAR VIDEO ======
+  // Ganti atau tambah alamat video kamu di sini (harus berawalan https://).
+  var BASE = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/";
+  var VIDEOS = [
+    { src: BASE + "ForBiggerBlazes.mp4",     title: "For Bigger Blazes",     sub: "Video contoh" },
+    { src: BASE + "ForBiggerEscapes.mp4",    title: "For Bigger Escapes",    sub: "Video contoh" },
+    { src: BASE + "ForBiggerFun.mp4",        title: "For Bigger Fun",        sub: "Video contoh" },
+    { src: BASE + "ForBiggerJoyrides.mp4",   title: "For Bigger Joyrides",   sub: "Video contoh" },
+    { src: BASE + "ForBiggerMeltdowns.mp4",  title: "For Bigger Meltdowns",  sub: "Video contoh" },
+    { src: BASE + "BigBuckBunny.mp4",        title: "Big Buck Bunny",        sub: "Film pendek Blender" },
+    { src: BASE + "ElephantsDream.mp4",      title: "Elephants Dream",       sub: "Film pendek Blender" },
+    { src: BASE + "Sintel.mp4",              title: "Sintel",                sub: "Film pendek Blender" },
+    { src: BASE + "TearsOfSteel.mp4",        title: "Tears of Steel",        sub: "Film pendek Blender" },
+    { src: BASE + "SubaruOutbackOnStreetAndDirt.mp4", title: "Subaru Outback", sub: "Video contoh" },
+    { src: BASE + "VolkswagenGTIReview.mp4", title: "Volkswagen GTI Review", sub: "Video contoh" },
+    { src: BASE + "WeAreGoingOnBullrun.mp4", title: "We Are Going On Bullrun", sub: "Video contoh" }
+  ];
+  // ===========================
+
+  var feed = document.getElementById("feed");
+  var muteBtn = document.getElementById("mute");
+  var addBtn = document.getElementById("add");
+  var addIn = document.getElementById("addIn");
+  var hint = document.getElementById("hint");
+
+  var ICON_HEART = '<svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></svg>';
+  var ICON_PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+  var ICON_SOUND = '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
+  var ICON_MUTED = '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m23 9-6 6M17 9l6 6"/></svg>';
+  var ICON_PLUS = '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>';
+
+  var muted = true;
+  var liked = {};
+  try { liked = JSON.parse(localStorage.getItem("liked") || "{}"); } catch (e) { liked = {}; }
+  function saveLiked() { try { localStorage.setItem("liked", JSON.stringify(liked)); } catch (e) {} }
+
+  function setMuteIcon() {
+    muteBtn.innerHTML = muted ? ICON_MUTED : ICON_SOUND;
+    muteBtn.setAttribute("aria-label", muted ? "Nyalakan suara" : "Matikan suara");
+  }
+  addBtn.innerHTML = ICON_PLUS;
+  setMuteIcon();
+
+  // Memuat video hanya yang dekat layar, agar hemat kuota dan memori.
+  var loadIO = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      var v = e.target.querySelector("video");
+      if (e.isIntersecting) {
+        if (!v.getAttribute("src")) { v.src = e.target.dataset.src; v.load(); }
+      } else if (v.getAttribute("src")) {
+        v.pause(); v.removeAttribute("src"); v.load();
+      }
+    });
+  }, { rootMargin: "150% 0px" });
+
+  // Memutar video yang sedang tampil, menjeda yang lain.
+  var playIO = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      var item = e.target, v = item.querySelector("video");
+      if (e.isIntersecting && e.intersectionRatio >= 0.6) {
+        if (!v.getAttribute("src")) { v.src = item.dataset.src; v.load(); }
+        v.muted = muted;
+        var p = v.play(); if (p && p.catch) p.catch(function () {});
+      } else {
+        v.pause();
+        item.classList.remove("paused");
+      }
+    });
+  }, { threshold: [0, 0.6] });
+
+  function setLike(item, on) {
+    var key = item.dataset.src;
+    if (on) liked[key] = 1; else delete liked[key];
+    item.querySelector(".like").classList.toggle("on", !!on);
+    saveLiked();
+  }
+
+  function make(data) {
+    var s = document.createElement("section");
+    s.className = "item";
+    s.dataset.src = data.src;
+    s.innerHTML =
+      '<video playsinline loop preload="metadata"></video>' +
+      '<div class="shade"></div>' +
+      '<div class="flash">' + ICON_PLAY + '</div>' +
+      '<div class="heartpop">' + ICON_HEART + '</div>' +
+      '<div class="oops"><p>Video gagal dimuat.</p><p>Periksa internet, lalu ketuk layar.</p></div>' +
+      '<div class="meta"><h2></h2><p></p></div>' +
+      '<div class="rail"><button class="ic like" aria-label="Suka">' + ICON_HEART + '</button></div>' +
+      '<div class="bar"></div>';
+    s.querySelector("h2").textContent = data.title;
+    s.querySelector(".meta p").textContent = data.sub;
+
+    var vid = s.querySelector("video");
+    var bar = s.querySelector(".bar");
+    var pop = s.querySelector(".heartpop");
+    var likeBtn = s.querySelector(".like");
+    vid.muted = muted;
+    if (liked[data.src]) likeBtn.classList.add("on");
+
+    vid.addEventListener("loadedmetadata", function () {
+      vid.classList.toggle("tall", vid.videoHeight > vid.videoWidth);
+    });
+    vid.addEventListener("timeupdate", function () {
+      if (vid.duration) bar.style.width = (vid.currentTime / vid.duration * 100) + "%";
+    });
+    vid.addEventListener("playing", function () { s.classList.remove("err"); });
+    vid.addEventListener("error", function () {
+      if (vid.getAttribute("src")) s.classList.add("err");
+    });
+
+    likeBtn.addEventListener("click", function () { setLike(s, !liked[data.src]); });
+
+    var last = 0, timer = null;
+    s.addEventListener("click", function (ev) {
+      if (ev.target.closest("button")) return;
+      if (s.classList.contains("err")) {
+        s.classList.remove("err");
+        vid.removeAttribute("src");
+        vid.src = s.dataset.src;
+        vid.load();
+        var q = vid.play(); if (q && q.catch) q.catch(function () {});
+        return;
+      }
+      var now = Date.now();
+      if (now - last < 300) {            // ketuk dua kali = suka
+        clearTimeout(timer); last = 0;
+        setLike(s, true);
+        pop.classList.remove("go"); void pop.offsetWidth; pop.classList.add("go");
+        return;
+      }
+      last = now;
+      timer = setTimeout(function () {   // ketuk sekali = jeda / lanjut
+        if (vid.paused) {
+          s.classList.remove("paused");
+          var r = vid.play(); if (r && r.catch) r.catch(function () {});
+        } else {
+          vid.pause();
+          s.classList.add("paused");
+        }
+      }, 300);
+    });
+
+    return s;
+  }
+
+  function register(item) { loadIO.observe(item); playIO.observe(item); }
+
+  VIDEOS.forEach(function (d) { var it = make(d); feed.appendChild(it); register(it); });
+
+  muteBtn.addEventListener("click", function () {
+    muted = !muted;
+    setMuteIcon();
+    feed.querySelectorAll("video").forEach(function (v) { v.muted = muted; });
+  });
+
+  addBtn.addEventListener("click", function () { addIn.click(); });
+  addIn.addEventListener("change", function () {
+    var files = Array.prototype.slice.call(addIn.files || []);
+    if (!files.length) return;
+    var first = feed.firstElementChild;
+    files.forEach(function (f) {
+      var it = make({
+        src: URL.createObjectURL(f),
+        title: f.name.replace(/\.[^.]+$/, ""),
+        sub: "Dari perangkat kamu"
+      });
+      feed.insertBefore(it, first);
+      register(it);
+    });
+    feed.scrollTop = 0;
+    addIn.value = "";
+  });
+
+  feed.addEventListener("scroll", function () { hint.classList.add("gone"); }, { once: true });
+})();
+</script>
+</body>
+</html>
